@@ -1,0 +1,47 @@
+# === Entornos Virtuales y Dependencias ===
+venv/
+.venv/
+env/
+ENV/
+dist/
+build/
+*.egg-info/
+
+# === Variables de Entorno y Secretos (CRÍTICO) ===
+.env
+.env.[a-zA-Z]*
+!.env.example
+secrets.toml
+
+# === Caché de Python y Pytest ===
+__pycache__/
+*/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Bases de Datos Locales (SQLite) ===
+*.db
+*.db-journal
+*.sqlite3
+*.sqlite
+
+# === Configuración de Editores (VS Code / JetBrains) ===
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# === Sistema Operativo ===
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

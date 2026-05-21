@@ -1,0 +1,28 @@
+<div align="center">
+  <h2>❤️ COMPENDIO D&D 5e - MÓDULO BETA: PROGRESIÓN, SALUD Y CONDICIONES</h2>
+  <p><b>Referencia Estricta:</b> SRD 5.2.1 | <b>Uso:</b> Modelo de Datos y Estados de Juego</p>
+</div>
+
+<hr />
+
+<h3>📈 1. Dados de Golpe y Progresión de Salud</h3>
+<p>La salud máxima (`max_hp`) y la recuperación del personaje durante los descansos se rigen de forma determinista por su clase:</p>
+<ul>
+  <li><b>Guerrero:</b> Dado de Golpe <code>1d10</code> por nivel. HP Nivel 1 = 10 + Modificador de Constitución.</li>
+  <li><b>Pícaro:</b> Dado de Golpe <code>1d8</code> por nivel. HP Nivel 1 = 8 + Modificador de Constitución.</li>
+  <li><b>Mago:</b> Dado de Golpe <code>1d6</code> por nivel. HP Nivel 1 = 6 + Modificador de Constitución.</li>
+  <li><b>Escalado por Nivel (Subidas):</b> Al subir de nivel, se añade el resultado del dado (o su valor fijo promedio redondeado hacia arriba: Guerrero=6, Pícaro=5, Mago=4) más el Modificador de Constitución al total de HP máximos.</li>
+</ul>
+
+<hr />
+
+<h3>🤮 2. Glosario de Condiciones Estrictas (Efectos en Mecánicas)</h3>
+<p>Si el JSON de base de datos del jugador registra un estado dentro de su array de condiciones, el backend alterará las matemáticas del motor y la IA adaptará su narrativa a las siguientes restricciones oficiales:</p>
+<ul>
+  <li><b>Cegado:</b> Falla automáticamente cualquier prueba que requiera la vista. Tiene desventaja en sus tiradas de ataque; los ataques contra él se realizan con ventaja.</li>
+  <li><b>Apresado:</b> Su velocidad pasa a ser 0 m de forma inmediata. No se beneficia de ningún bonificador de velocidad.</li>
+  <li><b>Envenenado:</b> Sufre desventaja de forma persistente en todas sus tiradas de ataque y pruebas de característica.</li>
+  <li><b>Incapacitado:</b> No puede realizar ningún tipo de acción ni reacción en el juego.</li>
+  <li><b>Derribado:</b> Su única opción de movimiento es arrastrarse. Tiene desventaja en sus tiradas de ataque. Los ataques cuerpo a cuerpo contra él disfrutan de ventaja; los ataques a distancia sufren de desventaja.</li>
+  <li><b>Inconsciente (0 HP):</b> El personaje cae incapacitado y derribado. Falla automáticamente las salvaciones de Fuerza y Destreza. Los ataques contra él tienen ventaja y, si impactan a menos de 1.5 metros, se convierten automáticamente en impactos críticos.</li>
+</ul>

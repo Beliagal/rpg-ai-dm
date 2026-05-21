@@ -1,0 +1,33 @@
+<div align="center">
+  <h2>🎲 COMPENDIO D&D 5e - MÓDULO ALFA: REGLAS ESENCIALES Y DADOS</h2>
+  <p><b>Referencia Estricta:</b> SRD 5.2.1 | <b>Uso:</b> Motor Matemático y Modificadores</p>
+</div>
+
+<hr />
+
+<h3>⚖️ 1. Reglas Matemáticas y de Resolución</h3>
+<ul>
+  <li><b>Fórmula del Modificador:</b> Deriva de la puntuación pura de estadística: <code>Modificador = (Puntuación - 10) // 2</code> (siempre redondeado hacia abajo). El backend debe calcular esto numéricamente.</li>
+  <li><b>Resolución de Desafíos (CD):</b> Muy Fácil (5), Fácil (10), Media (15), Difícil (20), Muy Difícil (25), Casi Imposible (30). El total calculado (`d20 + modificadores`) debe igualar o superar la CD para tener éxito.</li>
+  <li><b>Ventaja y Desventaja:</b> Mecánica de lanzar dos dados <code>d20</code> y quedarse con el valor más alto (Ventaja) o el más bajo (Desventaja) según los condicionantes del juego.</li>
+  <li><b>Éxitos y Fallos Críticos (Solo en Ataques):</b> Un 20 natural es un impacto automático y duplica los dados de daño (los modificadores se suman una sola vez al final). Un 1 natural es un fallo automático, independientemente del total acumulado.</li>
+</ul>
+
+<hr />
+
+<h3>📊 2. Mapeo Oficial de Características y Habilidades (Traducción SRD)</h3>
+<p>Cada prueba de habilidad ejecutada en el backend debe indexarse rígidamente a su característica correspondiente:</p>
+<ul>
+  <li><b>Fuerza (Fue):</b> Atletismo.</li>
+  <li><b>Destreza (Des):</b> Acrobacias, Juego de Manos, Sigilo. *(Influye de forma nativa en la Iniciativa y en la Clase de Armadura Base)*.</li>
+  <li><b>Constitución (Con):</b> Sin habilidades asociadas. Mide la salud y determina los Dados de Golpe para curarse y las tiradas de concentración mágica.</li>
+  <li><b>Inteligencia (Int):</b> Arcanos, Historia, Investigar, Naturaleza, Religión.</li>
+  <li><b>Sabiduría (Sab):</b> Averiguar Intenciones, Medicina, Percepción, Perspicacia, Supervivencia. *(Percepción Pasiva = 10 + Modificador de Sabiduría)*.</li>
+  <li><b>Carisma (Car):</b> Actuación, Engaño, Intimidación, Persuasión.</li>
+</ul>
+
+<hr />
+
+<h3>📖 3. Directriz conversacional para la IA (Dungeon Master)</h3>
+<p>Al procesar la narrativa, el LLM debe delegar el juicio mecánico al backend. Ante una declaración de intenciones arriesgada por parte del usuario, **el DM nunca resolverá el desenlace**. Debe pausar el texto en el momento álgido y solicitar la tirada reglamentaria en base a este compendio:</p>
+<p><i>Ejemplo correcto: "Corres hacia el portón blindado e hincas el hombro buscando reventar la cerradura... Por favor, realiza una prueba de Fuerza (Atletismo)."</i></p>

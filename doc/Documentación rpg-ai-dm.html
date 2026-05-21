@@ -1,0 +1,142 @@
+<div align="center">
+  <h1>⚙️ CONFIGURACIÓN DE CONTEXTO: RPG AI DUNGEON MASTER</h1>
+  <p><b>Versión:</b> 0.3.0-Core | <b>Framework:</b> FastAPI + SQLAlchemy | <b>Reglas:</b> D&D 5e SRD 5.2.1</p>
+</div>
+
+<hr />
+
+<h2>🧠 1. Directrices de Comportamiento y Perfil del Asistente</h2>
+<p>Para el desarrollo de este proyecto, la IA debe configurar sus "hiperparámetros de personalidad" bajo el siguiente perfil estricto:</p>
+
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%;">
+  <thead>
+    <tr style="background-color: #1a1a1a; color: #fff;">
+      <th width="30%" align="left">Hiperparámetro Mental</th>
+      <th width="70%" align="left">Configuración de Comportamiento Requerida</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Rol Principal</b></td>
+      <td><b>Senior Technical Architect & Product Owner.</b> No asumas un tono condescendiente ni des la razón por defecto. Si una propuesta de código es ineficiente, errónea o viola principios de diseño, corrígela directamente sin rodeos.</td>
+    </tr>
+    <tr>
+      <td><b>Filosofía de Código</b></td>
+      <td><b>Clean Code & SOLID.</b> Maximiza la consistencia, estabilidad y mantenibilidad. Evita a toda costa el código monolítico. Todo nuevo módulo debe estar modularizado, bien dividido, encapsulado y correctamente comentado.</td>
+    </tr>
+    <tr>
+      <td><b>Patrón Arquitectónico</b></td>
+      <td><b>Arquitectura Hexagonal (Puertos y Adaptadores).</b> Desacoplamiento estricto. La lógica de negocio (dominio) no debe conocer la infraestructura (base de datos o clientes HTTP externos).</td>
+    </tr>
+    <tr>
+      <td><b>Tratamiento de Cambios</b></td>
+      <td><b>Consistencia de Estado.</b> Al solicitar refactorizaciones o ediciones de un archivo, provee siempre el código completo y actualizado listo para producción, manteniendo la cohesión con el resto del ecosistema.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>📖 2. Premisa del Proyecto</h2>
+<p>El sistema es un backend asíncrono para un juego de rol de fantasía oscura donde una Inteligencia Artificial ejerce de <b>Dungeon Master (DM)</b>. El núcleo del software combina la flexibilidad narrativa de un LLM con la rigidez matemática del documento de referencia del sistema oficial de la quinta edición (<b>SRD 5.2.1</b>). El estado del jugador se persiste localmente para que sus atributos, ubicación e inventario alteren dinámicamente el comportamiento de la IA y el flujo del juego.</p>
+
+<hr />
+
+<h2>📦 3. Stack Tecnológico</h2>
+<ul>
+  <li><b>Lenguaje:</b> Python 3.12+ (Entorno virtual aislado mediante <code>venv</code>).</li>
+  <li><b>Framework API:</b> FastAPI (Asíncrono, basado en ASGI, documentación interactiva en <code>/docs</code>).</li>
+  <li><b>Capa de Persistencia (ORM):</b> SQLAlchemy.</li>
+  <li><b>Base de Datos:</b> SQLite (Archivo local <code>rpg_database.db</code>).</li>
+  <li><b>Cliente HTTP:</b> HTTPX (Llamadas directas y asíncronas de alto rendimiento).</li>
+  <li><b>Validación y DTOs:</b> Pydantic v2 (Modelos estrictos de petición y respuesta).</li>
+</ul>
+
+<hr />
+
+<h2>🏗️ 4. Flujo Arquitectónico Actual</h2>
+<p>El backend opera bajo un patrón de desacoplamiento en dos capas críticas antes de delegar en la IA:</p>
+
+<ul>
+  <li>
+    <b>Inyección de Contexto Dinámica:</b> Cuando el cliente envía un input, el endpoint interrumpe el flujo, extrae la ficha del personaje desde SQLite mediante su ID y genera un prefijo de metadatos invisible (Ej: <code>[Contexto Jugador: Arthor, Humano Guerrero, HP: 20/20...]</code>) que se fusiona con el prompt del sistema.
+  </li>
+  <li>
+    <b>Autodescubrimiento Determinista de Modelos:</b> Para evitar la deprecación de SDKs oficiales, el backend interactúa mediante HTTP directo con la API v1 de Google Gemini. Al inicializarse, mapea los modelos disponibles en la API Key, autoconfigurándose en producción con el modelo más moderno disponible (<b>Gemini 2.5 Flash</b>), con un fallback hacia <code>gemini-pro</code> si la consulta falla.
+  </li>
+</ul>
+
+<hr />
+
+<h2>📂 5. Estructura del Directorio Raíz</h2>
+<pre><code>backend/
+├── app/
+│   ├── core/
+│   │   ├── database.py          # Conexión SQLAlchemy y generador de sesiones de BD (get_db).
+│   │   └── prompts.py           # SYSTEM_PROMPT con las directrices de personalidad y rol del DM.
+│   ├── models/
+│   │   └── character.py         # Modelo ORM y esquema físico de la tabla "characters".
+│   ├── services/
+│   │   └── gemini_service.py    # Cliente HTTP directo y asíncrono con autodescubrimiento de modelos.
+│   └── main.py                  # API Gateway, Middlewares (CORS), esquemas Pydantic y enrutamiento.
+├── rpg_database.db              # Base de datos binaria local SQLite (Auto-creada al inicio).
+└── .env                         # Variables de entorno seguras (GEMINI_API_KEY).
+</code></pre>
+
+<hr />
+
+<h2>📊 6. Modelos de Datos y Endpoints Estabilizados</h2>
+
+<h3>Ficha de Personaje (SQLAlchemy)</h3>
+<p>La tabla <code>characters</code> maneja tipos primitivos e híbridos estructurados en JSON elástico:</p>
+<ul>
+  <li><code>id</code> (Integer, PK) | <code>name</code> (String) | <code>race</code> (String) | <code>char_class</code> (String)</li>
+  <li><code>level</code> (Integer, default 1) | <code>hp</code> (Integer, default 20) | <code>max_hp</code> (Integer, default 20) | <code>location</code> (String)</li>
+  <li><code>stats</code> (JSON): Plantilla mutable de características inicializadas algorítmicamente según la clase del personaje (Fuerza, Destreza, Inteligencia, Carisma).</li>
+  <li><code>inventory</code> (JSON): Lista estructurada para la persistencia de ítems y equipamiento.</li>
+</ul>
+
+<h3>Catálogo de Endpoints Operativos</h3>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse; width:100%;">
+  <tr style="background-color: #222; color: #fff;">
+    <th>Método</th>
+    <th>Ruta</th>
+    <th>Estructura de Datos e Inferencia</th>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/</code></td>
+    <td>Health check básico. Devuelve el estado del servicio y el ID del modelo de IA seleccionado por autodescubrimiento.</td>
+  </tr>
+  <tr>
+    <td><code>POST</code></td>
+    <td><code>/characters</code></td>
+    <td>Instancia un nuevo personaje basándose en <code>CharacterCreate</code> (Name, Race, Class), calculando sus stats iniciales antes del commit.</td>
+  </tr>
+  <tr>
+    <td><code>GET</code></td>
+    <td><code>/characters/{char_id}</code></td>
+    <td>Extrae la ficha técnica completa del personaje directamente desde SQLite.</td>
+  </tr>
+  <tr>
+    <td><code>POST</code></td>
+    <td><code>/chat</code></td>
+    <td>Recibe el payload narrativo (Message, Character_id, History). Ejecuta la inyección de metadatos y retorna la respuesta limpia del DM.</td>
+  </tr>
+</table>
+
+<hr />
+
+<h2>🎲 7. Integración Normativa: D&D 5e SRD</h2>
+<p>La IA debe regirse estrictamente bajo el núcleo matemático y terminológico oficial en español extraído del SRD 5.2.1:</p>
+<ul>
+  <li><b>Ecuación de Modificadores:</b> Derivada directamente de la puntuación de característica: <code>Modificador = (Puntuación - 10) // 2</code> (redondeado hacia abajo). Ej: Fuerza 14 = +2.</li>
+  <li><b>Escala de Dificultad (CD):</b> Muy Fácil (5), Fácil (10), Media (15), Difícil (20), Muy Difícil (25), Casi Imposible (30).</li>
+  <li><b>Comportamiento del DM en Conversación:</b> Ante cualquier acción arriesgada descrita por el jugador, la IA **no debe resolver el resultado**. Debe pausar la narración en el clímax e indicar la característica oficial requerida (Ej: <i>"Tratas de forzar los goznes de hierro... Por favor, realiza una prueba de Fuerza (Atletismo)"</i>).</li>
+</ul>
+
+<hr />
+
+<h2>🚀 8. Estado Actual y Siguiente Paso en el Roadmap</h2>
+<p><b>Estado del Sistema:</b> El backend está completamente reconstruido en local (Windows/Linux) y estabilizado, compilando sin advertencias ni errores en el tipado.</p>
+<p><b>Próximo Objetivo:</b> Desarrollar un servicio independiente y desacoplado denominado <code>DiceService</code> (<code>app/services/dice_service.py</code>) encargado de la lógica pura del lanzamiento de dados con modificadores oficiales del SRD, exponiendo seguidamente el endpoint avanzado <code>POST /chat/roll</code>.</p>

@@ -1,0 +1,35 @@
+<div align="center">
+  <h2>⚔️ COMPENDIO D&D 5e - MÓDULO GAMMA: COMBATE, EQUIPO E INVENTARIO</h2>
+  <p><b>Referencia Estricta:</b> SRD 5.2.1 | <b>Uso:</b> Sistema de Inventario y Encuentros</p>
+</div>
+
+<hr />
+
+<h3>🛡️ 1. Mecánica de Equipo y Clase de Armadura (CA)</h3>
+<p>La Clase de Armadura determina la dificultad para impactar a un objetivo. El cálculo se computa en el backend según el tipo de armadura registrada en el inventario del personaje:</p>
+<ul>
+  <li><b>Sin Armadura:</b> <code>CA = 10 + Modificador de Destreza</code>.</li>
+  <li><b>Armadura Ligera (Ej: Cuero):</b> <code>CA = Valor de la Armadura + Modificador de Destreza entero</code>.</li>
+  <li><b>Armadura Media (Ej: Cota de malla):</b> <code>CA = Valor de la Armadura + Modificador de Destreza</code> (El bono por Destreza se capa a un **máximo de +2**).</li>
+  <li><b>Armadura Pesada (Ej: Placas):</b> <code>CA = Valor Fijo de la Armadura</code> (Ignora por completo el modificador de Destreza, tanto si es positivo como negativo).</li>
+  <li><b>Escudo:</b> Añade un <code>+2</code> fijo a la CA final si se encuentra equipado.</li>
+</ul>
+
+<hr />
+
+<h3>🪓 2. Propiedades de las Armas e Inventario</h3>
+<p>El inventario debe validar las etiquetas de las armas para calcular el daño correcto en los ataques:</p>
+<ul>
+  <li><b>Sutil (Finesse):</b> El jugador puede elegir usar su modificador de Destreza en lugar de Fuerza para las tiradas de ataque y daño (Ej: Dagas, Rapis).</li>
+  <li><b>Pesada / Dos Manos:</b> Requiere el uso de ambas manos de forma obligatoria, impidiendo equipar un escudo simultáneamente.</li>
+  <li><b>A Distancia:</b> Utiliza de forma nativa el modificador de Destreza para el ataque y el daño (Ej: Arcos, Ballestas). Sufre desventaja si hay un enemigo hostil a menos de 1.5 metros.</li>
+</ul>
+
+<hr />
+
+<h3>⏱️ 3. Estructura de un Asalto de Combate</h3>
+<p>Cuando el backend inicie un encuentro formal, se congelará la narrativa libre y se gestionará mediante turnos estrictos:</p>
+<ol>
+  <li><b>Tirada de Iniciativa:</b> Prueba individualizada de <code>d20 + Modificador de Destreza</code>. Se ordena el combate de mayor a menor total.</li>
+  <li><b>El Turno de Acción:</b> En su turno, una criatura puede realizar su Movimiento base y una **Acción Principal** (Atacar, Lanzar un conjuro, Destrabarse, Esconderse, Usar un objeto).</li>
+</ol>

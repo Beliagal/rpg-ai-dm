@@ -1,0 +1,43 @@
+<div align="center">
+  <h2>🔮 COMPENDIO D&D 5e - MÓDULO DELTA: SISTEMA DE MAGIA Y CONJUROS</h2>
+  <p><b>Referencia Estricta:</b> SRD 5.2.1 | <b>Uso:</b> Motor de Lanzamiento, Grimorios y Slots</p>
+</div>
+
+<hr />
+
+<h3>📐 1. Estructura y Niveles de Conjuros</h3>
+<p>La magia en D&D 5e está rígidamente tasada por niveles de poder (del nivel 0 al 9) y requiere una infraestructura de almacenamiento de estado en el backend:</p>
+<ul>
+  <li><b>Trucos (Nivel 0):</b> Conjuros simples que se pueden lanzar a voluntad de forma ilimitada. No consumen recursos de la base de datos (slots).</li>
+  <li><b>Conjuros de Nivel (1-9):</b> Requieren la existencia y el consumo de un <b>Espacio de Conjuro (Spell Slot)</b> del nivel correspondiente. Si el array de slots del personaje para ese nivel está a 0, el backend debe rechazar el lanzamiento.</li>
+  <li><b>Restauración de Espacios:</b> Todos los espacios de conjuro gastados se restablecen al máximo tras completar un <b>Descanso Largo</b>.</li>
+</ul>
+
+<hr />
+
+<h3>⚡ 2. Mecánicas de Lanzamiento y Parámetros Estrictos</h3>
+<p>Cada vez que el backend valide la acción <i>"Lanzar un conjuro"</i>, debe comprobar cuatro variables físicas del objeto conjuro antes de enviar la orden a la IA:</p>
+<ul>
+  <li><b>Tiempo de Lanzamiento:</b> Generalmente 1 Acción, 1 Acción Adicional (Bonus Action) o 1 Reacción. *(Regla estricta: si lanzas un conjuro usando una Acción Adicional, el único otro conjuro que puedes lanzar en ese turno debe ser un Truco con un tiempo de lanzamiento de 1 acción)*.</li>
+  <li><b>Componentes:</b> Verbales (V), Somáticos (S) o Materiales (M). Si un componente material especifica un coste en piezas de oro (po), el backend debe verificar si el jugador lo posee en su JSON de inventario.</li>
+  <li><b>Duración e Instantáneos:</b> Los conjuros instantáneos resuelven su efecto y desaparecen. Los de duración persisten en el tiempo.</li>
+  <li><b>Concentración [Mecánica Crítica]:</b> Ciertos conjuros de duración exigen concentración. Un personaje **solo puede concentrarse en un conjuro a la vez**. Si sufre daño mientras se concentra, el backend debe forzar una **Tirada de Salvación de Constitución (CD 10 o la mitad del daño recibido, el valor que sea mayor)**. Si falla, el conjuro activo se cancela automáticamente.</li>
+</ul>
+
+<hr />
+
+<h3>📊 3. Las Matemáticas de la Magia (CD y Ataque Mágico)</h3>
+<p>Las clases mágicas utilizan una característica clave (Inteligencia para Magos, Sabiduría para Clérigos, Carisma para Bardos). El backend computará de forma determinista dos valores estáticos para la ficha de personaje:</p>
+<ul>
+  <li><b>Modificador de Ataque de Conjuro:</b> <code>Mod. Característica Mágica + Bonificador de Competencia</code>. Se usa cuando el conjuro exige una tirada de d20 para impactar a la CA del enemigo (Ej: <i>Descarga de fuego</i>).</li>
+  <li><b>CD de Salvación de Conjuros:</b> <code>8 + Mod. Característica Mágica + Bonificador de Competencia</code>. Se usa cuando el objetivo debe resistir el hechizo. El enemigo tirará el d20 y deberá igualar o superar esta CD para mitigar o anular el efecto (Ej: <i>Bola de fuego</i>).</li>
+</ul>
+
+<hr />
+
+<h3>📖 4. Integración Narrativa para el Dungeon Master (IA)</h3>
+<p>El LLM debe ceñirse a las limitaciones espaciales del conjuro inyectadas por el sistema:</p>
+<ol>
+  <li><b>Áreas de Efecto Oficiales:</b> Respetar la geometría descrita (Línea, Cono, Cubo, Esfera o Cilindro) para describir a qué elementos u objetivos del entorno afecta el hechizo.</li>
+  <li><b>Componentes Narrativos:</b> Describir cómo el personaje entona las palabras místicas (V) o gesticula con las manos libres (S) para dotar de inmersión técnica al juego, deteniendo la escena si las condiciones impiden el lanzamiento (ej: si el personaje está amordazado, no puede lanzar conjuros con componente Verbal).</li>
+</ol>

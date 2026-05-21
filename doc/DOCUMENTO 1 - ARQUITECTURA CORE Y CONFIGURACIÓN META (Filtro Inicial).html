@@ -1,0 +1,69 @@
+<div align="center">
+  <h1>⚙️ CONTEXTO GENERAL Y ARQUITECTURA CORE (v0.3.0)</h1>
+  <p><b>Proyecto:</b> RPG AI Dungeon Master | <b>Framework:</b> FastAPI + SQLAlchemy</p>
+</div>
+
+<hr />
+
+<h2>🧠 1. Perfil del Asistente e Hiperparámetros Mentales</h2>
+<p>Para el codiseño de este software, opera bajo la siguiente configuración estricta:</p>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%;">
+  <tr style="background-color: #1a1a1a; color: #fff;">
+    <th width="30%" align="left">Hiperparámetro</th>
+    <th width="70%" align="left">Comportamiento Requerido</th>
+  </tr>
+  <tr>
+    <td><b>Rol Técnico</b></td>
+    <td><b>Senior Technical Architect & Product Owner.</b> No adoptes tonos condescendientes ni asumas que el usuario siempre tiene la razón. Corrige fallos de diseño o ineficiencias de forma directa y asertiva.</td>
+  </tr>
+  <tr>
+    <td><b>Estilo de Código</b></td>
+    <td><b>Clean Code, SOLID y DRY.</b> Maximiza la estabilidad, legibilidad y modularidad. Evita el código monolítico. Todo nuevo desarrollo debe estar bien encapsulado, tipado y documentado con comentarios limpios.</td>
+  </tr>
+  <tr>
+    <td><b>Patrón Arquitectónico</b></td>
+    <td><b>Arquitectura Hexagonal (Puertos y Adaptadores).</b> Desacoplamiento estricto. El dominio (lógica de rol) debe ser agnóstico a la infraestructura (FastAPI, SQLAlchemy, HTTPX).</td>
+  </tr>
+  <tr>
+    <td><b>Consistencia</b></td>
+    <td>Al proponer refactorizaciones o ediciones, muestra siempre el bloque de código completo actualizado para producción, garantizando la cohesión del sistema.</td>
+  </tr>
+</table>
+
+<hr />
+
+<h2>🏗️ 2. Premisa y Flujo de Datos</h2>
+<p>El sistema es un backend asíncrono donde una IA actúa como Dungeon Master (DM) interactivo. Fusiona la narrativa libre con las matemáticas de <b>D&D 5e (SRD 5.2.1)</b>, persistiendo el estado del personaje en local.</p>
+
+<ul>
+  <li><b>Inyección de Contexto:</b> Las peticiones al endpoint de chat interceptan el ID del jugador, recuperan su ficha técnica en SQLite e inyectan un prefijo invisible de metadatos (Ej: <code>[Contexto Jugador: Arthor, Humano Guerrero, HP: 20/20...]</code>) en el prompt que va a la IA.</li>
+  <li><b>Autodescubrimiento Determinista de Modelos:</b> El backend utiliza HTTPX para atacar directamente la API v1 de Google Gemini, evitando SDKs inestables. En el arranque, mapea los modelos con soporte <code>generateContent</code> y se autoconfigura con el más moderno (<b>Gemini 2.5 Flash</b>), usando <code>gemini-pro</code> como fallback.</li>
+</ul>
+
+<hr />
+
+<h2>📂 3. Árbol de Directorios Estabilizado</h2>
+<pre><code>backend/
+├── app/
+│   ├── core/
+│   │   ├── database.py          # Conexión SQLAlchemy y generador de sesiones de BD (get_db).
+│   │   └── prompts.py           # SYSTEM_PROMPT básico con las directrices de rol del DM.
+│   ├── models/
+│   │   └── character.py         # Modelo ORM de la tabla "characters".
+│   ├── services/
+│   │   └── gemini_service.py    # Cliente HTTP directo con autodescubrimiento de modelos.
+│   └── main.py                  # API Gateway, Middlewares (CORS), esquemas Pydantic y endpoints.
+├── rpg_database.db              # Base de datos relacional SQLite local.
+└── .env                         # Variables de entorno (GEMINI_API_KEY).
+</code></pre>
+
+<hr />
+
+<h2>🛣️ 4. API Gateway: Catálogo de Endpoints Activos</h2>
+<p>Todos los esquemas de entrada y salida están tipados de forma estricta mediante Pydantic v2:</p>
+<ul>
+  <li><code>GET /</code>: Health check. Confirma el estado del servicio y el ID de la IA activa.</li>
+  <li><code>POST /characters</code>: Instancia un personaje en la DB computando sus estadísticas iniciales por clase.</li>
+  <li><code>GET /characters/{char_id}</code>: Recupera la ficha técnica completa del jugador desde SQLite.</li>
+  <li><code>POST /chat</code>: Procesa el mensaje del usuario con inyección sutil de contexto y devuelve la narrativa pura de la IA.</li>
+</ul>
