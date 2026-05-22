@@ -1,99 +1,73 @@
 import os
-import httpx
-from pathlib import Path
-from dotenv import load_dotenv
+import json
+from typing import List, Dict, Any, Optional
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
 from app.core.prompts import SYSTEM_PROMPT
-
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(dotenv_path=BASE_DIR / ".env")
+from app.schemas.ai_responses import StateMutationResponseSchema
 
 class GeminiService:
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        self.base_url = "https://generativelanguage.googleapis.com/v1"
-        self.model_id = None
-        
-        print("\n" + "="*40)
-        print("🔍 BUSCANDO MODELOS DISPONIBLES...")
-        
-        if not self.api_key:
-            print("❌ ERROR: No se encontró GEMINI_API_KEY")
-            return
+        # El SDK de Google GenAI inicializa automáticamente usando la variable GEMINI_API_KEY del entorno
+        self.client = genai.Client()
+        self.model_name = "gemini-2.5-flash"
 
-        try:
-            with httpx.Client() as client:
-                response = client.get(f"{self.base_url}/models?key={self.api_key}")
-                if response.status_code == 200:
-                    models_data = response.json().get('models', [])
-                    for m in models_data:
-                        if "generateContent" in m.get("supportedGenerationMethods", []):
-                            if "1.5-flash" in m.get("name") or "2.5-flash" in m.get("name"):
-                                self.model_id = m.get("name")
-                                break
-                            if not self.model_id:
-                                self.model_id = m.get("name")
-                    print(f"✅ Usando modelo: {self.model_id}")
-                else:
-                    print(f"❌ Error de API ({response.status_code})")
-        except Exception as e:
-            print(f"❌ Error al conectar con Google: {e}")
-
-        if not self.model_id:
-            self.model_id = "models/gemini-pro"
-        print("="*40 + "\n")
-
-    def generate_response(self, context_instruction: str, history: list = None) -> str:
-        if not self.api_key:
-            return "Error: API Key no configurada."
-
-        url = f"{self.base_url}/{self.model_id}:generateContent?key={self.api_key}"
-        
-        # Normalizar historial y corregir mapeo de roles para la API de Google
-        processed_contents = []
-        if history:
-            for item in history:
-                # Mapear rol 'assistant' a 'model' requerido por Gemini
-                raw_role = item.get("role", "user")
-                role = "model" if raw_role == "assistant" else raw_role
-                
-                if "parts" in item and isinstance(item["parts"], list):
-                    processed_contents.append({
-                        "role": role,
-                        "parts": item["parts"]
-                    })
-                elif "message" in item:  # Soporte para formato plano del frontend antiguo
-                    processed_contents.append({
-                        "role": role,
-                        "parts": [{"text": item["message"]}]
-                    })
-        else:
-            # Fallback defensivo si no hay historial
-            processed_contents = [{"role": "user", "parts": [{"text": "Comenzar narración."}]}]
-
-        # Combinar el prompt estático del DM con el contexto dinámico del personaje
+    def generate_structured_response(self, context_instruction: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Envía el historial de la conversación a Gemini exigiendo de forma nativa
+        un objeto JSON que cumpla estrictamente con el esquema StateMutationResponseSchema.
+        """
+        # Combinar el prompt del sistema con el contexto dinámico del personaje actual
         full_system_instruction = f"{SYSTEM_PROMPT}\n\n[CONTEXTO ACTUAL DEL JUEGO]\n{context_instruction}"
 
-        payload = {
-            "contents": processed_contents,
-            "systemInstruction": {
-                "parts": [{"text": full_system_instruction}]
-            },
-            "generationConfig": {
-                "temperature": 0.8, 
-                "maxOutputTokens": 1000
-            }
-        }
+        # Mapear el historial del formato interno de la DB al formato de contenidos exigido por el SDK GenAI
+        contents = []
+        for message in history:
+            # Gemini exige que los roles del historial sean estrictamente 'user' o 'model'
+            api_role = "model" if message["role"] == "assistant" else "user"
+            contents.append(
+                types.Content(
+                    role=api_role,
+                    parts=[types.Part.from_text(text=message["parts"][0]["text"])]
+                )
+            )
+
+        # Configurar la generación de la IA para forzar salida estructurada en JSON
+        config = types.GenerateContentConfig(
+            system_instruction=full_system_instruction,
+            temperature=0.7,
+            response_mime_type="application/json",
+            response_schema=StateMutationResponseSchema,
+        )
 
         try:
-            with httpx.Client() as client:
-                response = client.post(url, json=payload, timeout=30.0)
-                if response.status_code == 200:
-                    res_json = response.json()
-                    texto = res_json['candidates'][0]['content']['parts'][0]['text']
-                    print(f"\n📖 DM DIJO:\n{texto[:100]}...")
-                    return texto
-                return f"Error de narración (Status {response.status_code}): {response.text}"
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=config
+            )
+            
+            # Al usar response_schema, response.text es garantizado un string JSON válido con nuestra estructura
+            return json.loads(response.text)
+
+        except APIError as e:
+            return {
+                "narrative": f"Error de comunicación con el servicio de narración (Status {e.code}).",
+                "hp_change": None
+            }
         except Exception as e:
-            return f"Error de conexión: {str(e)}"
+            return {
+                "narrative": f"Error inesperado en el motor de IA: {str(e)}",
+                "hp_change": None
+            }
+
+    def generate_response(self, context_instruction: str, history: List[Dict[str, Any]]) -> str:
+        """
+        Método heredado preservado exclusivamente para mantener la compatibilidad hacia atrás
+        con los endpoints originales /game/chat y /game/roll del frontend.
+        """
+        structured = self.generate_structured_response(context_instruction, history)
+        return structured.get("narrative", "")
 
 gemini_service = GeminiService()

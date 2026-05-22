@@ -11,14 +11,15 @@ from app.models.message import Message
 from app.services.gemini_service import gemini_service
 from app.services.dice_service import dice_service
 from app.services.chat_service import ChatService
+from app.services.state_mutation_service import StateMutationService
+from app.schemas.ai_responses import HpMutationSchema
 
-# --- Esquema nuevo para persistencia ---
+# --- Esquemas de validación de entrada ---
 class ChatMessage(BaseModel):
     character_id: int
     role: Literal["user", "assistant"]
     content: str = Field(..., min_length=1)
 
-# --- Esquemas originales para compatibilidad ---
 class CharacterCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=50)
     race: str
@@ -56,7 +57,6 @@ class ActionRollRequest(BaseModel):
     force_disadvantage: Optional[bool] = False
     history: List[Dict[str, str]] = []
 
-# --- Ciclo de vida ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -64,8 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RPG AI Dungeon Master API", 
-    description="Motor de Backend con soporte para persistencia de historial",
-    version="0.3.1",
+    version="0.4.0",
     lifespan=lifespan
 )
 
@@ -77,43 +76,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Endpoint de Control (Health Check) ---
 @app.get("/")
 def health_check():
-    """Valida el estado operativo mínimo de la API para las suites de prueba."""
-    return {"status": "ok", "version": "0.3.1"}
+    return {"status": "ok", "version": "0.4.0"}
 
-# --- Nuevo Endpoint de Narrativa (Persistente) ---
+# --- Endpoint de Narrativa con Automatización de Estado ---
 @app.post("/narrate")
 async def narrate(data: ChatMessage, db: Session = Depends(get_db)):
     chat_service = ChatService(db)
+    mutation_service = StateMutationService(db)
     
     char = db.query(Character).filter(Character.id == data.character_id).first()
     if not char:
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
 
-    # 1. Persistir el mensaje actual enviado por el jugador
+    # 1. Guardar de forma persistente la acción enviada por el jugador
     chat_service.save_message(data.character_id, data.role, data.content)
     
-    # 2. Recuperar el historial con la ventana deslizante (incluye el mensaje actual)
+    # 2. Recuperar el historial bajo la regla de ventana deslizante
     history = chat_service.get_history(data.character_id, limit=10)
     formatted_history = [{"role": msg.role, "parts": [{"text": msg.content}]} for msg in history]
     
-    # 3. Construir instrucciones contextuales corregidas (char.char_class)
+    # 3. Construir instrucciones del contexto biológico del personaje
     context_instruction = f"Personaje Actual: {char.name} ({char.race} {char.char_class}). Puntos de Vida: {char.hp}/{char.max_hp}. Ubicación: {char.location}."
     
-    # 4. Enviar a Gemini controlando excepciones externas
-    ai_narrative = gemini_service.generate_response(context_instruction, formatted_history)
-    
+    # 4. Consumir el motor de IA estructurado
+    ai_result = gemini_service.generate_structured_response(context_instruction, formatted_history)
+    ai_narrative = ai_result.get("narrative", "")
+    hp_change_data = ai_result.get("hp_change")
+
+    # Si la IA falló catastróficamente o devolvió un mensaje de error simulado
     if "Error" in ai_narrative or ai_narrative.startswith("Error de"):
         raise HTTPException(status_code=502, detail=ai_narrative)
     
-    # 5. Guardar la respuesta generada por el DM en la base de datos
+    # 5. ORQUESTACIÓN: Si Gemini decidió aplicar efectos mecánicos sobre la vida
+    if hp_change_data:
+        try:
+            hp_schema = HpMutationSchema(
+                amount=hp_change_data["amount"],
+                reason=hp_change_data["reason"]
+            )
+            mutation_service.apply_hp_mutation(character_id=data.character_id, hp_mutation=hp_schema)
+        except Exception as mutation_error:
+            # Imprime el error en la consola de Uvicorn si la lógica interna de Python falla
+            print(f"❌ Error aplicando mutación: {str(mutation_error)}")
+
+    # 6. Persistir la narrativa final generada por el DM en el historial de chat
     chat_service.save_message(data.character_id, "assistant", ai_narrative)
     
+    # Retornamos la narrativa para el frontend (puedes expandir el payload si el frontend requiere alertas de mutación)
     return {"response": ai_narrative}
 
-# --- Endpoints originales (Preservados para compatibilidad del Frontend) ---
+# --- Endpoints heredados para compatibilidad del Frontend ---
 @app.post("/game/chat")
 def process_chat(request: ChatRequest, db: Session = Depends(get_db)):
     char = db.query(Character).filter(Character.id == request.character_id).first()
@@ -139,12 +153,9 @@ def process_action_roll(request: ActionRollRequest, db: Session = Depends(get_db
 @app.post("/characters/", response_model=CharacterResponse, status_code=201)
 def create_character(char_data: CharacterCreate, db: Session = Depends(get_db)):
     db_char = Character(
-        name=char_data.name, 
-        race=char_data.race, 
-        char_class=char_data.char_class,
+        name=char_data.name, race=char_data.race, char_class=char_data.char_class,
         stats={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10}, 
-        hp=12, 
-        max_hp=12
+        hp=12, max_hp=12
     )
     db.add(db_char)
     db.commit()
