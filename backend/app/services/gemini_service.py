@@ -42,24 +42,57 @@ class GeminiService:
             self.model_id = "models/gemini-pro"
         print("="*40 + "\n")
 
-    def generate_response(self, user_input: str, history: list = None):
+    def generate_response(self, context_instruction: str, history: list = None) -> str:
         if not self.api_key:
             return "Error: API Key no configurada."
 
         url = f"{self.base_url}/{self.model_id}:generateContent?key={self.api_key}"
+        
+        # Normalizar historial y corregir mapeo de roles para la API de Google
+        processed_contents = []
+        if history:
+            for item in history:
+                # Mapear rol 'assistant' a 'model' requerido por Gemini
+                raw_role = item.get("role", "user")
+                role = "model" if raw_role == "assistant" else raw_role
+                
+                if "parts" in item and isinstance(item["parts"], list):
+                    processed_contents.append({
+                        "role": role,
+                        "parts": item["parts"]
+                    })
+                elif "message" in item:  # Soporte para formato plano del frontend antiguo
+                    processed_contents.append({
+                        "role": role,
+                        "parts": [{"text": item["message"]}]
+                    })
+        else:
+            # Fallback defensivo si no hay historial
+            processed_contents = [{"role": "user", "parts": [{"text": "Comenzar narración."}]}]
+
+        # Combinar el prompt estático del DM con el contexto dinámico del personaje
+        full_system_instruction = f"{SYSTEM_PROMPT}\n\n[CONTEXTO ACTUAL DEL JUEGO]\n{context_instruction}"
+
         payload = {
-            "contents": [{"role": "user", "parts": [{"text": f"{SYSTEM_PROMPT}\n\nUsuario: {user_input}"}]}],
-            "generationConfig": {"temperature": 0.8, "maxOutputTokens": 1000}
+            "contents": processed_contents,
+            "systemInstruction": {
+                "parts": [{"text": full_system_instruction}]
+            },
+            "generationConfig": {
+                "temperature": 0.8, 
+                "maxOutputTokens": 1000
+            }
         }
 
         try:
             with httpx.Client() as client:
                 response = client.post(url, json=payload, timeout=30.0)
                 if response.status_code == 200:
-                    texto = response.json()['candidates'][0]['content']['parts'][0]['text']
+                    res_json = response.json()
+                    texto = res_json['candidates'][0]['content']['parts'][0]['text']
                     print(f"\n📖 DM DIJO:\n{texto[:100]}...")
                     return texto
-                return f"Error de narración (Status {response.status_code})"
+                return f"Error de narración (Status {response.status_code}): {response.text}"
         except Exception as e:
             return f"Error de conexión: {str(e)}"
 

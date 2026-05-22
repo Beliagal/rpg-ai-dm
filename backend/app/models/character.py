@@ -1,11 +1,12 @@
 from sqlalchemy import Column, Integer, String, JSON
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 
 class Character(Base):
     __tablename__ = "characters"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True, nullable=False)  # Corregido: un único envoltorio Column
+    name = Column(String, index=True, nullable=False)
     race = Column(String, nullable=False)
     char_class = Column(String, nullable=False)
     
@@ -17,14 +18,22 @@ class Character(Base):
     gold = Column(Integer, default=10, nullable=False)
     location = Column(String, default="Taberna de la Sangre de Dragón")
 
-    # Características Puras (Fuerza, Destreza, Constitución, Inteligencia, Sabiduría, Carisma)
+    # Características Puras
     stats = Column(JSON, nullable=False)
 
-    # Bloques Elásticos del SRD (Competencias, Condiciones e Inventario)
-    proficiencies = Column(JSON, nullable=False)
-    conditions = Column(JSON, nullable=False)
-    spell_slots = Column(JSON, nullable=False)
-    inventory = Column(JSON, nullable=False)
+    # Bloques Elásticos del SRD
+    proficiencies = Column(JSON, default=dict, nullable=False)
+    conditions = Column(JSON, default=list, nullable=False)
+    spell_slots = Column(JSON, default=dict, nullable=False)
+    inventory = Column(JSON, default=list, nullable=False)
+
+    # Relación para persistencia de historial
+    messages = relationship(
+        "Message", 
+        back_populates="character", 
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
 
     @property
     def proficiency_bonus(self) -> int:

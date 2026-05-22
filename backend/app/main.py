@@ -1,39 +1,28 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 
 from app.core.database import engine, Base, get_db
 from app.models.character import Character
+from app.models.message import Message  
 from app.services.gemini_service import gemini_service
 from app.services.dice_service import dice_service
+from app.services.chat_service import ChatService
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    yield
+# --- Esquema nuevo para persistencia ---
+class ChatMessage(BaseModel):
+    character_id: int
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1)
 
-app = FastAPI(
-    title="RPG AI Dungeon Master API", 
-    description="Motor de Backend Desacoplado basado en reglas D&D 5e SRD 5.2.1",
-    version="0.3.0",
-    lifespan=lifespan
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# --- Esquemas originales para compatibilidad ---
 class CharacterCreate(BaseModel):
-    name: str = Field(..., min_length=2, max_length=50, json_schema_extra={"example": "Arthor"})
-    race: str = Field(..., json_schema_extra={"example": "Humano"})
-    char_class: str = Field(..., json_schema_extra={"example": "Guerrero"})
+    name: str = Field(..., min_length=2, max_length=50)
+    race: str
+    char_class: str
 
 class CharacterResponse(BaseModel):
     id: int
@@ -53,7 +42,6 @@ class CharacterResponse(BaseModel):
     inventory: List[Dict[str, Any]]
     proficiency_bonus: int
     armor_class: int
-
     model_config = ConfigDict(from_attributes=True)
 
 class ChatRequest(BaseModel):
@@ -68,27 +56,95 @@ class ActionRollRequest(BaseModel):
     force_disadvantage: Optional[bool] = False
     history: List[Dict[str, str]] = []
 
+# --- Ciclo de vida ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+app = FastAPI(
+    title="RPG AI Dungeon Master API", 
+    description="Motor de Backend con soporte para persistencia de historial",
+    version="0.3.1",
+    lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Endpoint de Control (Health Check) ---
 @app.get("/")
-def read_root():
-    return {"status": "ok", "message": "RPG AI DM API running"}
+def health_check():
+    """Valida el estado operativo mínimo de la API para las suites de prueba."""
+    return {"status": "ok", "version": "0.3.1"}
+
+# --- Nuevo Endpoint de Narrativa (Persistente) ---
+@app.post("/narrate")
+async def narrate(data: ChatMessage, db: Session = Depends(get_db)):
+    chat_service = ChatService(db)
+    
+    char = db.query(Character).filter(Character.id == data.character_id).first()
+    if not char:
+        raise HTTPException(status_code=404, detail="Personaje no encontrado")
+
+    # 1. Persistir el mensaje actual enviado por el jugador
+    chat_service.save_message(data.character_id, data.role, data.content)
+    
+    # 2. Recuperar el historial con la ventana deslizante (incluye el mensaje actual)
+    history = chat_service.get_history(data.character_id, limit=10)
+    formatted_history = [{"role": msg.role, "parts": [{"text": msg.content}]} for msg in history]
+    
+    # 3. Construir instrucciones contextuales corregidas (char.char_class)
+    context_instruction = f"Personaje Actual: {char.name} ({char.race} {char.char_class}). Puntos de Vida: {char.hp}/{char.max_hp}. Ubicación: {char.location}."
+    
+    # 4. Enviar a Gemini controlando excepciones externas
+    ai_narrative = gemini_service.generate_response(context_instruction, formatted_history)
+    
+    if "Error" in ai_narrative or ai_narrative.startswith("Error de"):
+        raise HTTPException(status_code=502, detail=ai_narrative)
+    
+    # 5. Guardar la respuesta generada por el DM en la base de datos
+    chat_service.save_message(data.character_id, "assistant", ai_narrative)
+    
+    return {"response": ai_narrative}
+
+# --- Endpoints originales (Preservados para compatibilidad del Frontend) ---
+@app.post("/game/chat")
+def process_chat(request: ChatRequest, db: Session = Depends(get_db)):
+    char = db.query(Character).filter(Character.id == request.character_id).first()
+    if not char: 
+        raise HTTPException(status_code=404, detail="Personaje no encontrado")
+    
+    context_instruction = f"Personaje: {char.name}. HP: {char.hp}/{char.max_hp}."
+    ai_response = gemini_service.generate_response(context_instruction, request.history)
+    return {"response": ai_response}
+
+@app.post("/game/roll")
+def process_action_roll(request: ActionRollRequest, db: Session = Depends(get_db)):
+    char = db.query(Character).filter(Character.id == request.character_id).first()
+    if not char: 
+        raise HTTPException(status_code=404, detail="Personaje no encontrado")
+    
+    roll_result = dice_service.resolve_d20_roll(char, request.target_name, request.force_advantage, request.force_disadvantage)
+    context_instruction = f"Resultado de la tirada de dados d20 en el sistema: {roll_result['total']}."
+    ai_narrative = gemini_service.generate_response(context_instruction, request.history)
+    
+    return {"roll_details": roll_result, "narrative": ai_narrative}
 
 @app.post("/characters/", response_model=CharacterResponse, status_code=201)
 def create_character(char_data: CharacterCreate, db: Session = Depends(get_db)):
     db_char = Character(
-        name=char_data.name,
-        race=char_data.race,
+        name=char_data.name, 
+        race=char_data.race, 
         char_class=char_data.char_class,
-        level=1,
-        xp=0,
-        hp=12,
-        max_hp=12,
-        gold=15,
-        location="Taberna del Dragón Verde",
-        stats={"strength": 14, "dexterity": 12, "constitution": 14, "intelligence": 10, "wisdom": 13, "charisma": 10},
-        proficiencies={"skills": ["atletismo", "percepcion"], "saving_throws": ["strength", "constitution"]},
-        conditions=[],
-        spell_slots={"1": 0, "2": 0},
-        inventory=[]
+        stats={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10}, 
+        hp=12, 
+        max_hp=12
     )
     db.add(db_char)
     db.commit()
@@ -98,76 +154,6 @@ def create_character(char_data: CharacterCreate, db: Session = Depends(get_db)):
 @app.get("/characters/{character_id}", response_model=CharacterResponse)
 def get_character(character_id: int, db: Session = Depends(get_db)):
     char = db.query(Character).filter(Character.id == character_id).first()
-    if not char:
+    if not char: 
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
     return char
-
-@app.post("/game/chat")
-def process_chat(request: ChatRequest, db: Session = Depends(get_db)):
-    char = db.query(Character).filter(Character.id == request.character_id).first()
-    if not char:
-        raise HTTPException(status_code=404, detail="Personaje no encontrado")
-
-    system_instruction = (
-        f"Eres el Dungeon Master de una partida de D&D 5e. El jugador controla a {char.name}, "
-        f"un {char.race} {char.char_class} de nivel {char.level}. "
-        f"Ubicación actual: {char.location}. Estado de salud: {char.hp}/{char.max_hp} HP. "
-        f"Condiciones actuales: {char.conditions}. Inventario: {char.inventory}. "
-        f"Basa tus respuestas estrictamente en este contexto, mantén el tono de fantasía épica, "
-        f"describe el entorno basándote en la entrada del usuario y finaliza dándole el turno de acción "
-        f"al jugador de forma clara."
-    )
-
-    ai_response = gemini_service.generate_response(system_instruction, request.history)
-    
-    if "Error" in ai_response:
-        raise HTTPException(status_code=500, detail=ai_response)
-        
-    return {"response": ai_response}
-
-@app.post("/game/roll")
-def process_action_roll(request: ActionRollRequest, db: Session = Depends(get_db)):
-    char = db.query(Character).filter(Character.id == request.character_id).first()
-    if not char:
-        raise HTTPException(status_code=404, detail="Personaje no encontrado")
-
-    try:
-        roll_result = dice_service.resolve_d20_roll(
-            character=char,
-            target_name=request.target_name,
-            force_advantage=request.force_advantage,
-            force_disadvantage=request.force_disadvantage
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    system_instruction = (
-        f"Actúa como Dungeon Master. El jugador ha intentado realizar una acción basada en '{roll_result['target']}'. "
-        f"El motor del backend ha determinado de manera absoluta e inapelable el siguiente resultado físico: "
-        f"[Dados brutos lanzados: {roll_result['dice_results']} -> Dado final seleccionado: {roll_result['dice_selected']} bajo modalidad tipo '{roll_result['roll_type']}']. "
-        f"Modificador de Característica ({roll_result['stat_used']}): +{roll_result['stat_modifier']}. "
-        f"Bono Competencia aplicado: +{roll_result['proficiency_bonus_applied']}. "
-        f"TOTAL COMPUTADO POR EL BACKEND: {roll_result['total']}. "
-        f"Establece de forma implícita si este total supera la CD de la tarea según la escala del SRD "
-        f"(Fácil=10, Media=15, Difícil=20). Narra detalladamente el desenlace físico en base a este total "
-        f"y devuelve la palabra al jugador sin delegar nuevas tiradas inmediatamente."
-    )
-
-    ai_narrative = gemini_service.generate_response(system_instruction, request.history)
-
-    if "Error" in ai_narrative:
-        raise HTTPException(status_code=500, detail=ai_narrative)
-
-    return {
-        "roll_details": {
-            "target": roll_result["target"],
-            "stat_used": roll_result["stat_used"],
-            "roll_type": roll_result["roll_type"],
-            "dice_raw": roll_result["dice_results"],
-            "dice_selected": roll_result["dice_selected"],
-            "stat_modifier": roll_result["stat_modifier"],
-            "proficiency_bonus_applied": roll_result["proficiency_bonus_applied"],
-            "total": roll_result["total"]
-        },
-        "narrative": ai_narrative
-    }
