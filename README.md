@@ -50,3 +50,15 @@ Para configurar el entorno de trabajo:
    pytest -v
 
 Nota: La arquitectura de pruebas asegura que cualquier modificación en el core de reglas o en la estructura de los contratos de la IA pase por una suite de validación rigurosa antes de cualquier despliegue.
+
+
+# 🚀 Visión Estratégica & Roadmap Técnico
+El desarrollo del proyecto está orientado a la evolución progresiva de las mecánicas de juego y la persistencia del contexto narrativo:
+
+*   **Fase 1: Motor Base y Continuidad (Completado):** Implementación de la arquitectura de servicios desacoplada, gestión del historial de sesión con ventana deslizante (*sliding window*) y simulación de dados básica.
+*   **Fase 2: Automatización del Estado (Completado):** Integración de *Structured Outputs* con Gemini y desarrollo del `StateMutationService` para el procesamiento transaccional de impactos de salud (HP) en la base de datos SQLite.
+*   **Fase 3: Inventario e Interacción con el Entorno (Próximo Incremento):** 
+    *   Diseño de mutaciones dinámicas de inventario (recogida, descarte y uso de objetos).
+    *   Persistencia de localización y transiciones de estado del entorno (bloqueo de puertas, cofres abiertos/cerrados).
+*   **Fase 4: Sistema de Combate Dinámico y Condiciones:** Motor de estados avanzado para gestionar turnos, iniciativa, recursos limitados (espejos de conjuros, habilidades por descanso) y estados alterados (envenenado, asustado).
+*   **Fase 5: Base de Conocimiento Experta (RAG):** Integración de las reglas oficiales del SRD mediante técnicas de recuperación de información para que el DM valide la viabilidad de las acciones del jugador en tiempo real.
