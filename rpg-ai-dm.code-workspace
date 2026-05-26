@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "name": "🎨 FRONTEND (Next.js)",
+      "path": "frontend"
+    },
+    {
+      "name": "📦 BACKEND & CONFIG",
+      "path": "."
+    }
+  ],
+  "settings": {}
+}
