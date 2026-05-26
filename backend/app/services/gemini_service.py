@@ -6,6 +6,7 @@ from google.genai import types
 from google.genai.errors import APIError
 from app.core.prompts import SYSTEM_PROMPT
 from app.schemas.ai_responses import StateMutationResponseSchema
+from app.schemas.environment_mutation import EnvironmentMutationSchema
 
 class GeminiService:
     def __init__(self):

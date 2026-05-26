@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from app.schemas.inventory_mutation import InventoryMutationListSchema
+from app.schemas.environment_mutation import EnvironmentMutationSchema
 
 class HpMutationSchema(BaseModel):
     """
@@ -26,4 +28,12 @@ class StateMutationResponseSchema(BaseModel):
     hp_change: Optional[HpMutationSchema] = Field(
         None, 
         description="Bloque de mutación de salud. Se debe rellenar ÚNICAMENTE si la acción del jugador o el evento narrativo resulta en una alteración directa de sus puntos de vida actuales."
+    )
+    inventory_changes: Optional[InventoryMutationListSchema] = Field(
+        None,
+        description="Bloque de mutación de inventario. Se rellena si el jugador obtiene, consume o pierde objetos."
+    )
+    environment_changes: Optional[EnvironmentMutationSchema] = Field(
+        None,
+        description="Bloque de mutación de entorno. Se rellena si el personaje cambia de localización geográfica."
     )
