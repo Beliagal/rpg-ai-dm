@@ -8,11 +8,13 @@ from contextlib import asynccontextmanager
 from app.core.database import engine, Base, get_db
 from app.models.character import Character
 from app.models.message import Message  
-from app.services.gemini_service import gemini_service
 from app.services.dice_service import dice_service
 from app.services.chat_service import ChatService
 from app.services.state_mutation_service import StateMutationService
-from app.schemas.ai_responses import HpMutationSchema
+from app.schemas.ai_responses import StateMutationResponseSchema
+
+# Único servicio de IA habilitado (Local Offline)
+from app.services.local_ai_service import local_ai_service
 
 # --- Esquemas de validación de entrada ---
 class ChatMessage(BaseModel):
@@ -64,7 +66,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RPG AI Dungeon Master API", 
-    version="0.4.0",
+    version="0.5.0", 
     lifespan=lifespan
 )
 
@@ -78,102 +80,86 @@ app.add_middleware(
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "version": "0.4.0"}
+    return {"status": "ok", "version": "0.5.0", "ai_engine": "local_ollama"}
 
 # --- Endpoint de Narrativa con Automatización de Estado ---
 @app.post("/narrate")
 async def narrate(data: ChatMessage, db: Session = Depends(get_db)):
-    chat_service = ChatService(db)
-    mutation_service = StateMutationService(db)
-    
-    char = db.query(Character).filter(Character.id == data.character_id).first()
-    if not char:
-        raise HTTPException(status_code=404, detail="Personaje no encontrado")
+    try:
+        chat_service = ChatService(db)
+        mutation_service = StateMutationService(db)
+        
+        char = db.query(Character).filter(Character.id == data.character_id).first()
+        if not char:
+            raise HTTPException(status_code=404, detail="Personaje no encontrado")
 
-    # 1. Guardar de forma persistente la acción enviada por el jugador
-    chat_service.save_message(data.character_id, data.role, data.content)
-    
-    # 2. Recuperar el historial bajo la regla de ventana deslizante
-    history = chat_service.get_history(data.character_id, limit=10)
-    formatted_history = [{"role": msg.role, "parts": [{"text": msg.content}]} for msg in history]
-    
-    # 3. Construir instrucciones del contexto incluyendo el inventario real para la IA
-    context_instruction = (
-        f"Personaje Actual: {char.name} ({char.race} {char.char_class}). "
-        f"Puntos de Vida: {char.hp}/{char.max_hp}. "
-        f"Ubicación: {char.location}. "
-        f"Inventario Actual: {char.inventory}."
-    )
-    
-    # 4. Consumir el motor de IA estructurado
-    ai_result = gemini_service.generate_structured_response(context_instruction, formatted_history)
-    ai_narrative = ai_result.get("narrative", "")
-    hp_change_data = ai_result.get("hp_change")
-    inventory_change_data = ai_result.get("inventory_changes")
-    environment_change_data = ai_result.get("environment_changes")
+        # Lógica de persistencia e historial de chat
+        chat_service.save_message(data.character_id, data.role, data.content)
+        history = chat_service.get_history(data.character_id, limit=10)
+        
+        formatted_history = [{"role": msg.role, "parts": [{"text": msg.content}]} for msg in history]
+        
+        context_instruction = (
+            f"Personaje Actual: {char.name} ({char.race} {char.char_class}). "
+            f"Puntos de Vida: {char.hp}/{char.max_hp}. "
+            f"Ubicación: {char.location}. "
+            f"Inventario Actual: {char.inventory}."
+        )
+        
+        # Consumo asíncrono de IA Local
+        ai_result_dict = await local_ai_service.generate_structured_response(context_instruction, formatted_history)
+        
+        # Hidratación del diccionario a objeto Pydantic para mantener los atributos requeridos por StateMutationService
+        ai_result = StateMutationResponseSchema.model_validate(ai_result_dict)
+        
+        # Inserción de lógica de mutaciones mediante los objetos validados
+        if ai_result.hp_change:
+            mutation_service.apply_hp_mutation(char.id, ai_result.hp_change)
+            
+        if ai_result.inventory_changes:
+            mutation_service.apply_inventory_mutations(char.id, ai_result.inventory_changes)
+            
+        if ai_result.environment_changes:
+            mutation_service.apply_environment_mutations(char.id, ai_result.environment_changes)
+        
+        if ai_result.narrative:
+            chat_service.save_message(data.character_id, "assistant", ai_result.narrative)
+            
+        return {"response": ai_result.narrative}
 
-    # Si la IA falló catastróficamente o devolvió un mensaje de error simulado
-    if "Error" in ai_narrative or ai_narrative.startswith("Error de"):
-        raise HTTPException(status_code=502, detail=ai_narrative)
-    
-    # 5. ORQUESTACIÓN TRANSACCIONAL EN CASCADA SEGURO (TRY/EXCEPT AISLADOS)
-    
-    # A. Mutación de Puntos de Vida (HP)
-    if hp_change_data:
-        try:
-            hp_schema = HpMutationSchema(
-                amount=hp_change_data["amount"],
-                reason=hp_change_data["reason"]
-            )
-            mutation_service.apply_hp_mutation(character_id=data.character_id, hp_mutation=hp_schema)
-        except Exception as mutation_error:
-            print(f"❌ Error aplicando mutación de salud: {str(mutation_error)}")
+    except Exception as e:
+        import traceback
+        print("🚨 ERROR CRÍTICO EN NARRATE:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # B. Mutación de Inventario (Sincronizado con la firma real del servicio)
-    if inventory_change_data and inventory_change_data.get("mutations"):
-        try:
-            from app.schemas.inventory_mutation import InventoryMutationListSchema
-            inv_schema = InventoryMutationListSchema(**inventory_change_data)
-            mutation_service.apply_inventory_mutations(character_id=data.character_id, inventory_mutations=inv_schema)
-        except Exception as inv_error:
-            print(f"❌ Error aplicando mutación de inventario: {str(inv_error)}")
-
-    # C. Mutación de Entorno y Localización
-    if environment_change_data:
-        try:
-            from app.schemas.environment_mutation import EnvironmentMutationSchema
-            env_schema = EnvironmentMutationSchema(**environment_change_data)
-            mutation_service.apply_environment_mutations(character_id=data.character_id, env_mutation=env_schema)
-        except Exception as env_error:
-            print(f"❌ Error aplicando mutación de entorno: {str(env_error)}")
-
-    # 6. Persistir la narrativa final generada por el DM en el historial de chat
-    chat_service.save_message(data.character_id, "assistant", ai_narrative)
-    
-    return {"response": ai_narrative}
-
-# --- Endpoints heredados para compatibilidad del Frontend ---
+# --- Endpoints auxiliares para compatibilidad ---
 @app.post("/game/chat")
-def process_chat(request: ChatRequest, db: Session = Depends(get_db)):
+async def process_chat(request: ChatRequest, db: Session = Depends(get_db)):
     char = db.query(Character).filter(Character.id == request.character_id).first()
     if not char: 
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
     
     context_instruction = f"Personaje: {char.name}. HP: {char.hp}/{char.max_hp}."
-    ai_response = gemini_service.generate_response(context_instruction, request.history)
-    return {"response": ai_response}
+    
+    ai_result_dict = await local_ai_service.generate_structured_response(context_instruction, request.history)
+    ai_result = StateMutationResponseSchema.model_validate(ai_result_dict)
+    
+    return {"response": ai_result.narrative}
 
 @app.post("/game/roll")
-def process_action_roll(request: ActionRollRequest, db: Session = Depends(get_db)):
+async def process_action_roll(request: ActionRollRequest, db: Session = Depends(get_db)):
     char = db.query(Character).filter(Character.id == request.character_id).first()
     if not char: 
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
     
     roll_result = dice_service.resolve_d20_roll(char, request.target_name, request.force_advantage, request.force_disadvantage)
     context_instruction = f"Resultado de la tirada de dados d20 en el sistema: {roll_result['total']}."
-    ai_narrative = gemini_service.generate_response(context_instruction, request.history)
     
-    return {"roll_details": roll_result, "narrative": ai_narrative}
+    ai_result_dict = await local_ai_service.generate_structured_response(context_instruction, request.history)
+    ai_result = StateMutationResponseSchema.model_validate(ai_result_dict)
+    
+    return {"roll_details": roll_result, "narrative": ai_result.narrative}
 
 @app.post("/characters/", response_model=CharacterResponse, status_code=201)
 def create_character(char_data: CharacterCreate, db: Session = Depends(get_db)):

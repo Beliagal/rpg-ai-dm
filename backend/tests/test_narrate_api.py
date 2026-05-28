@@ -1,17 +1,13 @@
 import pytest
-from unittest.mock import MagicMock
-from fastapi.testclient import TestClient
-from app.main import app
-from app.services.gemini_service import gemini_service
+from unittest.mock import AsyncMock
+from app.services.local_ai_service import local_ai_service
 
-client = TestClient(app)
-
-def test_narrate_endpoint_applies_all_mutations_successfully(monkeypatch):
+def test_narrate_endpoint_applies_all_mutations_successfully(client, monkeypatch):
     """
     Test de integración End-to-End. Verifica que el endpoint /narrate
-    procesa en cascada y de forma segura las mutaciones de estado tras la respuesta de la IA.
+    procesa en cascada y de forma segura las mutaciones de estado tras la respuesta de la IA Local.
     """
-    # 1. SETUP: Crear el personaje a través de la API oficial para asegurar coherencia en DB
+    # 1. SETUP: Crear el personaje a través del cliente de pruebas (usa la DB en memoria)
     char_payload = {
         "name": "Regdar",
         "race": "Humano",
@@ -21,7 +17,7 @@ def test_narrate_endpoint_applies_all_mutations_successfully(monkeypatch):
     assert create_response.status_code == 201
     character_id = create_response.json()["id"]
 
-    # 2. Mockear la respuesta estructurada que devolvería GeminiService
+    # 2. Mockear la respuesta estructurada que devolvería LocalAiService usando AsyncMock
     mock_response = {
         "narrative": "Abres el cofre viejo; una aguja envenenada te pincha el dedo, pero encuentras una gema reluciente y decides bajar por las escaleras hacia la cripta.",
         "hp_change": {"amount": -2, "reason": "Aguja envenenada"},
@@ -36,10 +32,11 @@ def test_narrate_endpoint_applies_all_mutations_successfully(monkeypatch):
         }
     }
     
+    # Interceptamos el método asíncrono del servicio local de Ollama
     monkeypatch.setattr(
-        gemini_service, 
+        local_ai_service, 
         "generate_structured_response", 
-        MagicMock(return_value=mock_response)
+        AsyncMock(return_value=mock_response)
     )
 
     # 3. EJECUCIÓN: Consumir el endpoint de narrativa

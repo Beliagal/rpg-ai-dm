@@ -18,7 +18,7 @@ class HpMutationSchema(BaseModel):
 
 class StateMutationResponseSchema(BaseModel):
     """
-    Contrato estricto exigido a la API de Google Gemini. 
+    Contrato estricto exigido al motor de IA Local (Ollama). 
     Fuerza al modelo de lenguaje a separar la experiencia inmersiva del jugador de las mutaciones mecánicas de las reglas del SRD 5e.
     """
     narrative: str = Field(
