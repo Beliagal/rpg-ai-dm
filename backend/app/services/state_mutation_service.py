@@ -197,3 +197,45 @@ class StateMutationService:
         Procesa la mutación estructural mapeada directamente desde la respuesta JSON de la IA.
         """
         return self.apply_spell_usage(character_id, spell_mutation.level)
+    
+    def apply_mutations(self, character_id: int, ai_response: dict) -> Character:
+        """
+        Punto de entrada único y orquestador para procesar de forma secuencial 
+        todas las mutaciones mecánicas devueltas por el motor de IA.
+        """
+        char = self._get_character(character_id)
+
+        # 1. Mutación de Puntos de Vida (HP)
+        hp_data = ai_response.get("hp_change")
+        if hp_data:
+            from app.schemas.ai_responses import HpMutationSchema
+            # Si viene como dict crudo desde el LLM, lo cargamos en su esquema
+            if isinstance(hp_data, dict):
+                hp_data = HpMutationSchema.model_validate(hp_data)
+            self.apply_hp_mutation(character_id, hp_data)
+
+        # 2. Mutación de Inventario
+        inv_data = ai_response.get("inventory_changes")
+        if inv_data:
+            from app.schemas.inventory_mutation import InventoryMutationListSchema
+            if isinstance(inv_data, dict):
+                inv_data = InventoryMutationListSchema.model_validate(inv_data)
+            self.apply_inventory_mutations(character_id, inv_data)
+
+        # 3. Mutación de Entorno (Localización)
+        env_data = ai_response.get("environment_changes")
+        if env_data:
+            from app.schemas.environment_mutation import EnvironmentMutationSchema
+            if isinstance(env_data, dict):
+                env_data = EnvironmentMutationSchema.model_validate(env_data)
+            self.apply_environment_mutations(character_id, env_data)
+
+        # 4. Mutación de Espacios de Conjuro (Spell Slots)
+        spell_data = ai_response.get("spell_used")
+        if spell_data:
+            from app.schemas.ai_responses import SpellMutationSchema
+            if isinstance(spell_data, dict):
+                spell_data = SpellMutationSchema.model_validate(spell_data)
+            self.apply_spell_mutation(character_id, spell_data)
+
+        return char

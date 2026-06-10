@@ -1,55 +1,108 @@
 import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
+from sqlalchemy.orm import Session
+
+from app.models.character import Character
 from app.services.chat_service import ChatService
-from app.models.message import Message
 
-def test_save_message_persists_and_links_to_character(db_session, mock_guerrero):
-    # Setup inicial: añadir el personaje al contexto de la BD
-    db_session.add(mock_guerrero)
-    db_session.commit()
+pytestmark = pytest.mark.asyncio
 
-    chat_service = ChatService(db_session)
-    msg = chat_service.save_message(mock_guerrero.id, "user", "Observo el mapa de la pared.")
+@pytest.fixture(name="db_session")
+def fixture_db_session():
+    return MagicMock(spec=Session)
 
-    # Verificaciones del modelo Message
-    assert msg.id is not None
-    assert msg.character_id == mock_guerrero.id
-    assert msg.role == "user"
-    assert msg.content == "Observo el mapa de la pared."
+@pytest.fixture(name="mock_character")
+def fixture_mock_character():
+    character = MagicMock(spec=Character)
+    character.id = 1
+    character.name = "Regdar"
+    character.race = "Human"
+    character.char_class = "Fighter"
+    character.level = 3
+    character.hp = 20
+    character.max_hp = 26
+    character.gold = 150
+    character.location = "Cripta Oscura"
+    character.modifiers = {"strength": 3}
+    character.conditions = []
+    character.spell_slots = {}
+    character.current_weight = 45.0
+    character.carrying_capacity = 240.0
+    character.inventory = []
+    return character
 
-    # Verificación de la relación bidireccional Lazy Load en Character
-    assert len(mock_guerrero.messages) == 1
-    assert mock_guerrero.messages[0].content == "Observo el mapa de la pared."
 
-def test_get_history_applies_sliding_window_limit(db_session, mock_guerrero):
-    db_session.add(mock_guerrero)
-    db_session.commit()
-
-    chat_service = ChatService(db_session)
-
-    # Inserción de 5 mensajes secuenciales
-    for i in range(1, 6):
-        chat_service.save_message(mock_guerrero.id, "user", f"Turno {i}")
-
-    # Recuperación con ventana deslizante de tamaño 3
-    history = chat_service.get_history(mock_guerrero.id, limit=3)
-
-    assert len(history) == 3
-    # Comprobar que los mensajes devueltos son los últimos y están en orden cronológico
-    assert history[0].content == "Turno 3"
-    assert history[1].content == "Turno 4"
-    assert history[2].content == "Turno 5"
-
-def test_cascade_delete_removes_messages_when_character_deleted(db_session, mock_guerrero):
-    db_session.add(mock_guerrero)
-    db_session.commit()
+async def test_process_player_turn_without_roll(db_session, mock_character):
+    db_session.get.return_value = mock_character
+    
+    ai_mock_response = {
+        "narrative": "Te sientas en la taberna a descansar.",
+        "roll_intent": {"requires_roll": False, "roll_target": None, "dc": 15},
+        "hp_change": None,
+        "inventory_changes": None,
+        "environment_changes": None,
+        "spell_used": None
+    }
 
     chat_service = ChatService(db_session)
-    chat_service.save_message(mock_guerrero.id, "assistant", "Un goblin salta de las sombras.")
+    
+    # Parcheamos los servicios en sus módulos originales, no en chat_service
+    with patch("app.services.local_ai_service.local_ai_service.generate_structured_response", new_callable=AsyncMock) as mock_ai, \
+         patch("app.services.state_mutation_service.StateMutationService.apply_mutations") as mock_mutations:
+        
+        mock_ai.return_value = ai_mock_response
+        result = await chat_service.process_player_turn(character_id=1, player_action="Descanso.")
+        
+        assert result["narrative"] == ai_mock_response["narrative"]
+        mock_mutations.assert_called_once_with(mock_character.id, ai_mock_response)
 
-    # Acción destructiva
-    db_session.delete(mock_guerrero)
-    db_session.commit()
 
-    # Verificación de limpieza en base de datos
-    messages_in_db = db_session.query(Message).count()
-    assert messages_in_db == 0
+async def test_process_player_turn_with_successful_roll_interception(db_session, mock_character):
+    db_session.get.return_value = mock_character
+    
+    first_ai_response = {
+        "narrative": "Arremetes contra la puerta...",
+        "roll_intent": {"requires_roll": True, "roll_target": "atletismo", "dc": 14},
+        "hp_change": None,
+        "inventory_changes": None,
+        "environment_changes": None,
+        "spell_used": None
+    }
+    
+    second_ai_response = {
+        "narrative": "La puerta cede ante tu fuerza letal.",
+        "roll_intent": {"requires_roll": False, "roll_target": None, "dc": 14},
+        "hp_change": None,
+        "inventory_changes": None,
+        "environment_changes": None,
+        "spell_used": None
+    }
+
+    mock_roll_result = {
+        "target": "atletismo",
+        "stat_used": "strength",
+        "roll_type": "normal",
+        "dice_results": [11],
+        "dice_selected": 11,
+        "stat_modifier": 3,
+        "proficiency_bonus_applied": 0,
+        "is_proficient": False,
+        "total": 14
+    }
+
+    chat_service = ChatService(db_session)
+    
+    # Parcheamos los servicios en sus módulos originales, no en chat_service
+    with patch("app.services.local_ai_service.local_ai_service.generate_structured_response", new_callable=AsyncMock) as mock_ai, \
+         patch("app.services.dice_service.dice_service.resolve_d20_roll") as mock_dice, \
+         patch("app.services.state_mutation_service.StateMutationService.apply_mutations") as mock_mutations:
+        
+        mock_ai.side_effect = [first_ai_response, second_ai_response]
+        mock_dice.return_value = mock_roll_result
+        
+        result = await chat_service.process_player_turn(character_id=1, player_action="Derribo la puerta.")
+        
+        assert mock_ai.call_count == 2
+        mock_dice.assert_called_once_with(mock_character, "atletismo")
+        mock_mutations.assert_called_once_with(mock_character.id, second_ai_response)
+        assert result["narrative"] == "La puerta cede ante tu fuerza letal."

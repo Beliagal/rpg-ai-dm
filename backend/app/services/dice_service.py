@@ -1,10 +1,13 @@
 import random
+import unicodedata
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.character import Character
 
 class DiceService:
+    # Diccionario base mapeado de forma limpia (sin tildes y en minúsculas)
+    # para garantizar coincidencias robustas con la IA o la UI.
     SKILL_TO_STAT_MAP = {
         "atletismo": "strength",
         "acrobacias": "dexterity",
@@ -21,16 +24,23 @@ class DiceService:
         "perspicacia": "wisdom",
         "supervivencia": "wisdom",
         "actuacion": "charisma",
-        "engaño": "charisma",
+        "engano": "charisma",
         "intimidacion": "charisma",
         "persuasion": "charisma"
     }
 
-    def roll_dice(self, faces: int) -> int:
-        return random.randint(1, faces)
+    def _normalize_text(self, text: str) -> str:
+        """Elimina acentos, espacios extra y convierte a minúsculas."""
+        text_clean = text.strip().lower()
+        # Remueve diacríticos (tildes) de forma estándar en Python
+        return "".join(
+            c for c in unicodedata.normalize('NFD', text_clean)
+            if unicodedata.category(c) != 'Mn'
+        )
 
-    def calculate_stat_modifier(self, score: int) -> int:
-        return (score - 10) // 2
+    def roll_dice(self, faces: int) -> int:
+        """Genera un número aleatorio simulando las caras de un dado."""
+        return random.randint(1, faces)
 
     def resolve_d20_roll(
         self, 
@@ -39,8 +49,13 @@ class DiceService:
         force_advantage: bool = False, 
         force_disadvantage: bool = False
     ) -> Dict[str, Any]:
-        target_clean = target_name.strip().lower()
+        """
+        Resuelve una tirada de d20 calculando de forma dinámica ventajas/desventajas
+        por estados del SRD, modificadores de características y bonos de competencia.
+        """
+        target_clean = self._normalize_text(target_name)
         
+        # Determinamos si es Check de Habilidad o Salvación/Atributo Puro
         if target_clean in self.SKILL_TO_STAT_MAP:
             stat_key = self.SKILL_TO_STAT_MAP[target_clean]
             is_skill = True
@@ -50,14 +65,19 @@ class DiceService:
         else:
             raise ValueError(f"El objetivo de tirada '{target_name}' no es una habilidad o estadística válida del SRD.")
 
+        # Gestión estructural de ventajas y desventajas
         has_advantage = force_advantage
         has_disadvantage = force_disadvantage
 
+        # Soporte bilingüe para las condiciones mecánicas restrictivas de d20
         if isinstance(character.conditions, list):
-            conditions_clean = [c.lower() for c in character.conditions]
-            if "envenenado" in conditions_clean or "asustado" in conditions_clean:
+            conditions_normalized = [self._normalize_text(str(c)) for c in character.conditions]
+            disadvantage_triggers = ["envenenado", "poisoned", "asustado", "frightened"]
+            
+            if any(trigger in conditions_normalized for trigger in disadvantage_triggers):
                 has_disadvantage = True
 
+        # Resolver el tipo de tirada resultante
         if has_advantage and has_disadvantage:
             roll_type = "normal"
         elif has_advantage:
@@ -67,6 +87,7 @@ class DiceService:
         else:
             roll_type = "normal"
 
+        # Ejecución física de los dados
         dice_1 = self.roll_dice(20)
         dice_2 = self.roll_dice(20) if roll_type != "normal" else None
 
@@ -77,24 +98,29 @@ class DiceService:
         elif roll_type == "disadvantage":
             final_dice = min(dice_1, dice_2)
 
-        character_stats = character.stats if isinstance(character.stats, dict) else {}
-        stat_score = character_stats.get(stat_key, 10)
-        stat_modifier = self.calculate_stat_modifier(stat_score)
+        # FUENTE DE VERDAD: Extraemos el modificador directamente calculado por el modelo
+        character_modifiers = character.modifiers if hasattr(character, "modifiers") else {}
+        stat_modifier = character_modifiers.get(stat_key, 0)
 
         applied_proficiency_bonus = 0
         is_proficient = False
         
-        if is_skill and isinstance(character.proficiencies, dict):
-            skills_list = character.proficiencies.get("skills", [])
-            if target_clean in [s.lower() for s in skills_list]:
-                applied_proficiency_bonus = getattr(character, "proficiency_bonus", 0)
-                is_proficient = True
-        elif not is_skill and isinstance(character.proficiencies, dict):
-            saves_list = character.proficiencies.get("saving_throws", [])
-            if stat_key in [s.lower() for s in saves_list]:
-                applied_proficiency_bonus = getattr(character, "proficiency_bonus", 0)
-                is_proficient = True
+        # Evaluación de Competencias (Proficiencies)
+        if isinstance(character.proficiencies, dict):
+            if is_skill:
+                skills_list = character.proficiencies.get("skills", [])
+                skills_normalized = [self._normalize_text(s) for s in skills_list]
+                if target_clean in skills_normalized:
+                    applied_proficiency_bonus = character.proficiency_bonus
+                    is_proficient = True
+            else:
+                saves_list = character.proficiencies.get("saving_throws", [])
+                saves_normalized = [self._normalize_text(s) for s in saves_list]
+                if stat_key in saves_normalized or target_clean in saves_normalized:
+                    applied_proficiency_bonus = character.proficiency_bonus
+                    is_proficient = True
 
+        # Operación matemática final según las reglas SRD
         total = final_dice + stat_modifier + applied_proficiency_bonus
 
         return {
@@ -109,4 +135,5 @@ class DiceService:
             "total": total
         }
 
+# Instancia singleton para inyección en controladores/rutas
 dice_service = DiceService()
