@@ -1,6 +1,27 @@
-import { Character, ChatMessagePayload, NarrateResponse } from '@/types/rpg';
+import { Character } from '@/types/rpg';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Estructura exacta para los objetos del inventario
+export interface InventoryItem {
+  name: string;
+  quantity: number;
+}
+
+// Estructura exacta para los espacios de conjuro (ej: { "1": 3, "2": 1 })
+export type SpellSlots = Record<string, number>;
+
+// Contrato estricto y seguro devuelto por el ChatService del backend
+export interface GameTurnResponse {
+  narrative: string;
+  character_id: number;
+  hp_current: number;
+  hp_max: number;
+  conditions: string[];
+  location: string;
+  inventory: InventoryItem[];
+  spell_slots: SpellSlots;
+}
 
 export const apiService = {
   /**
@@ -15,19 +36,24 @@ export const apiService = {
   },
 
   /**
-   * Envía la acción del jugador al Dungeon Master y recupera la narrativa estructurada.
+   * Envía la acción narrativa del jugador al orquestador en dos tiempos del backend.
+   * Retorna la narrativa del DM y el estado mutado del personaje de forma atómica.
    */
-  async sendNarrativeAction(payload: ChatMessagePayload): Promise<NarrateResponse> {
-    const response = await fetch(`${API_BASE_URL}/narrate`, {
+  async sendPlayerAction(characterId: number, playerAction: string): Promise<GameTurnResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/chat/turn`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        character_id: characterId,
+        player_action: playerAction
+      }),
     });
 
     if (!response.ok) {
-      throw new Error(`Error en el motor de narrativa (${response.status})`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Error en el turno de juego (${response.status})`);
     }
     return response.json();
   }

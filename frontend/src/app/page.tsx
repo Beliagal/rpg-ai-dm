@@ -9,14 +9,14 @@ export default function Home() {
   const { character, messages, isLoading, error, sendAction } = useGameSession(1);
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 flex flex-col items-center justify-center">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 flex flex-col items-center justify-center font-sans">
       <div className="w-full max-w-4xl flex flex-col gap-4">
         
         {/* Cabecera de Estado Sincronizada */}
         <header className="border-b border-slate-800 pb-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold tracking-wide text-amber-500">RPG AI Dungeon Master</h1>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-400 mt-1">
               Ubicación: <span className="text-slate-200 font-medium">{character ? character.location : 'Cargando...'}</span>
             </p>
           </div>
@@ -36,8 +36,12 @@ export default function Home() {
         )}
 
         {/* Consola de juego */}
-        <ChatLog messages={messages} isLoading={isLoading} />
-        <ChatInput onSendMessage={sendAction} disabled={isLoading || !character} />
+        <ChatLog messages={messages} />
+        
+        {/* Barra inferior corregida con la propiedad 'onSend' que exige el componente */}
+        <div className="mt-2">
+          <ChatInput onSend={sendAction} disabled={isLoading || !character} />
+        </div>
 
       </div>
     </main>

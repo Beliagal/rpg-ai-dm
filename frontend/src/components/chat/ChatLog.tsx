@@ -1,55 +1,43 @@
 import React from 'react';
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-}
+import { Message } from '@/hooks/useGameSession';
 
 interface ChatLogProps {
   messages: Message[];
-  isLoading: boolean;
 }
 
-export function ChatLog({ messages, isLoading }: ChatLogProps) {
-  return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900 border border-slate-800 rounded-lg min-h-[400px] max-h-[600px]">
-      {messages.length === 0 && (
-        <div className="text-slate-500 text-center mt-10 italic">
-          La taberna está en silencio. Describe tu primera acción para comenzar la aventura...
-        </div>
-      )}
+export const ChatLog: React.FC<ChatLogProps> = ({ messages }) => {
+  if (messages.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-slate-500 text-sm italic">
+        Describe tu primera acción para que el Dungeon Master comience la crónica...
+      </div>
+    );
+  }
 
-      {messages.map((msg, index) => {
-        const isDM = msg.role === 'assistant';
+  return (
+    <div className="space-y-4">
+      {messages.map((msg, idx) => {
+        const isUser = msg.role === 'user';
         return (
           <div
-            key={index}
-            className={`flex ${isDM ? 'justify-start' : 'justify-end'}`}
+            key={idx}
+            className={`flex flex-col max-w-[85%] ${isUser ? 'ml-auto items-end' : 'mr-auto items-start'}`}
           >
+            <span className="text-[10px] text-slate-500 mb-1 px-1">
+              {isUser ? 'Tú (Acción)' : 'Dungeon Master'}
+            </span>
             <div
-              className={`max-w-[80%] rounded-lg p-3 text-sm leading-relaxed ${
-                isDM
-                  ? 'bg-slate-800 text-slate-100 border-l-4 border-amber-500 rounded-bl-none'
-                  : 'bg-amber-700 text-amber-50 rounded-br-none font-medium'
+              className={`rounded-lg px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap shadow-sm ${
+                isUser
+                  ? 'bg-amber-600 text-slate-50 font-medium rounded-tr-none'
+                  : 'bg-slate-850 border border-slate-800 text-slate-300 rounded-tl-none serif-text'
               }`}
             >
-              <div className="text-xs opacity-50 mb-1 font-semibold tracking-wider">
-                {isDM ? '🔮 DUNGEON MASTER' : '⚔️ JUGADOR'}
-              </div>
-              <p className="whitespace-pre-line">{msg.content}</p>
+              {msg.content}
             </div>
           </div>
         );
       })}
-
-      {isLoading && (
-        <div className="flex justify-start">
-          <div className="bg-slate-800 text-slate-400 text-sm italic rounded-lg p-3 rounded-bl-none animate-pulse">
-            🔮 El Dungeon Master está consultando los dados y tejiendo el destino...
-          </div>
-        </div>
-      )}
     </div>
   );
-}
+};
