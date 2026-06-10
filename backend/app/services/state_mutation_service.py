@@ -1,142 +1,126 @@
 import logging
 from sqlalchemy.orm import Session
-from app.models.character import Character
-from app.schemas.ai_responses import HpMutationSchema
-from app.schemas.inventory_mutation import InventoryMutationListSchema
 from sqlalchemy.orm.attributes import flag_modified
+from app.models.character import Character
+from app.schemas.ai_responses import HpMutationSchema, SpellMutationSchema
+from app.schemas.inventory_mutation import InventoryMutationListSchema
 from app.schemas.environment_mutation import EnvironmentMutationSchema
 
 logger = logging.getLogger(__name__)
 
 class StateMutationService:
     """
-    Servicio especializado en procesar de forma transaccional las mutaciones de estado
-    del personaje dictadas por el motor de inteligencia artificial.
+    Servicio de Capa de Aplicación encargado de la mutación e integridad del estado
+    del personaje, forzando las reglas de juego del SRD 5e de manera transaccional.
     """
     def __init__(self, db: Session):
         self.db = db
 
-    def apply_hp_mutation(self, character_id: int, hp_mutation: HpMutationSchema) -> Character:
-        """
-        Modifica de forma segura los Puntos de Vida (HP) actuales de un personaje.
-        Garantiza que el valor nunca sea menor que 0 ni supere el max_hp configurado,
-        cumpliendo estrictamente las reglas mecánicas del SRD 5e.
-        
-        :param character_id: ID único del personaje en la base de datos.
-        :param hp_mutation: Instancia validada de HpMutationSchema con amount y reason.
-        :return: El objeto Character modificado y actualizado.
-        :raises ValueError: Si el personaje no existe en la persistencia.
-        """
+    def _get_character(self, character_id: int) -> Character:
+        """Recupera un personaje de forma limpia o lanza una excepción controlada."""
         char = self.db.query(Character).filter(Character.id == character_id).first()
         if not char:
             raise ValueError(f"Character with ID {character_id} not found in database.")
+        return char
 
+    def apply_hp_mutation(self, character_id: int, hp_mutation: HpMutationSchema) -> Character:
+        """
+        Modifica los Puntos de Vida (HP) actuales limitando por las cotas mecánicas [0, max_hp].
+        Aplica reactivamente estados derivados como 'Unconscious'.
+        """
+        char = self._get_character(character_id)
         old_hp = char.hp
-        # amount es negativo para daño y positivo para sanación
+        
         new_hp = old_hp + hp_mutation.amount
-
-        # Aplicar límites mecánicos de D&D 5e (0 <= hp <= max_hp)
         if new_hp > char.max_hp:
             new_hp = char.max_hp
         elif new_hp < 0:
             new_hp = 0
 
         char.hp = new_hp
+        char.evaluate_automatic_conditions()
         
-        # Guardar los cambios en la base de datos
-        self.db.commit()
-        self.db.refresh(char)
+        flag_modified(char, "conditions")
 
-        # Log del servidor para trazabilidad de auditoría mecánica
-        mutation_type = "DAMAGE" if hp_mutation.amount < 0 else "HEAL"
-        logger.info(
-            f"🔮 [STATE MUTATION - {mutation_type}] {char.name} (ID: {character_id}): "
-            f"HP changed from {old_hp} to {new_hp}/{char.max_hp}. Reason: {hp_mutation.reason}"
-        )
+        try:
+            self.db.commit()
+            self.db.refresh(char)
+            
+            mutation_type = "DAMAGE" if hp_mutation.amount < 0 else "HEAL"
+            logger.info(
+                f"🔮 [SRD MUTATION - {mutation_type}] {char.name} (ID: {character_id}): "
+                f"HP {old_hp} -> {new_hp}/{char.max_hp}. Reason: {hp_mutation.reason}"
+            )
+            return char
+        except Exception as e:
+            self.db.rollback()
+            raise RuntimeError(f"Fallo crítico al persistir mutación de HP: {str(e)}")
 
-        return char
-    
     def apply_inventory_mutations(self, character_id: int, inventory_mutations: InventoryMutationListSchema) -> Character:
         """
-        Modifica el estado del inventario del personaje de forma transaccional.
-        Suma o resta elementos basándose en las mutaciones calculadas por la IA.
+        Modifica el inventario calculando dinámicamente el peso y alterando 
+        el estado de carga (Encumbered) si se superan los límites del SRD.
         """
         if not inventory_mutations.mutations:
-            return self.db.query(Character).filter(Character.id == character_id).first()
+            return self._get_character(character_id)
 
-        char = self.db.query(Character).filter(Character.id == character_id).first()
-        if not char:
-            raise ValueError(f"Personaje con ID {character_id} no encontrado.")
-
-        # Garantizamos que trabajamos con una lista mutable (Deep copy implícito por SQLAlchemy)
+        char = self._get_character(character_id)
         current_inventory = list(char.inventory) if char.inventory else []
 
         for mutation in inventory_mutations.mutations:
             item_name_lower = mutation.name.strip().lower()
-            
-            # Buscar si el ítem ya existe en el inventario actual
-            existing_item = None
-            for item in current_inventory:
-                if isinstance(item, dict) and item.get("name", "").strip().lower() == item_name_lower:
-                    existing_item = item
-                    break
+            existing_item = next(
+                (item for item in current_inventory 
+                 if isinstance(item, dict) and item.get("name", "").strip().lower() == item_name_lower),
+                None
+            )
 
             if mutation.action == "add":
                 if existing_item:
-                    # Si ya existe, acumulamos la cantidad
                     existing_item["quantity"] = existing_item.get("quantity", 1) + mutation.quantity
                 else:
-                    # Si es nuevo, lo construimos respetando el formato que espera tu propiedad armor_class
                     new_item = {
                         "name": mutation.name.strip(),
                         "quantity": mutation.quantity,
                         "type": mutation.type.lower() if mutation.type else "utility",
                         "equipped": False,
+                        "weight": float(mutation.properties.get("weight", 0.0)),
                         **mutation.properties
                     }
                     current_inventory.append(new_item)
 
             elif mutation.action == "remove":
                 if existing_item:
-                    current_qty = existing_item.get("quantity", 1)
-                    new_qty = current_qty - mutation.quantity
+                    new_qty = existing_item.get("quantity", 1) - mutation.quantity
                     if new_qty <= 0:
                         current_inventory.remove(existing_item)
                     else:
                         existing_item["quantity"] = new_qty
-                # Si no existía el ítem a remover, se ignora de forma segura para evitar excepciones en mitad de la partida
 
-        # Forzamos la actualización en el ORM reasignando la estructura modificada
         char.inventory = current_inventory
+        char.evaluate_automatic_conditions()
         
-        # Notificamos explícitamente a SQLAlchemy que el JSON interno ha mutado
         flag_modified(char, "inventory")
-        
+        flag_modified(char, "conditions")
+
         try:
             self.db.commit()
             self.db.refresh(char)
             return char
         except Exception as e:
             self.db.rollback()
-            raise RuntimeError(f"Fallo crítico al persistir la mutación del inventario: {str(e)}")
+            raise RuntimeError(f"Fallo crítico al persistir mutación de inventario: {str(e)}")
 
     def apply_environment_mutations(self, character_id: int, env_mutation: EnvironmentMutationSchema) -> Character:
-        """
-        Actualiza de forma transaccional la ubicación del personaje y procesa
-        las alteraciones del entorno provocadas en el turno.
-        """
-        if not env_mutation.new_location and not env_mutation.world_flags:
-            return self.db.query(Character).filter(Character.id == character_id).first()
+        """Actualiza de forma segura la localización del personaje en el mundo."""
+        if not env_mutation.new_location:
+            return self._get_character(character_id)
 
-        char = self.db.query(Character).filter(Character.id == character_id).first()
-        if not char:
-            raise ValueError(f"Personaje con ID {character_id} no encontrado.")
-
-        # Actualización de la localización física
-        if env_mutation.new_location:
-            new_loc_clean = env_mutation.new_location.strip()
-            if new_loc_clean and char.location != new_loc_clean:
-                char.location = new_loc_clean
+        char = self._get_character(character_id)
+        new_loc_clean = env_mutation.new_location.strip()
+        
+        if new_loc_clean and char.location != new_loc_clean:
+            char.location = new_loc_clean
 
         try:
             self.db.commit()
@@ -144,4 +128,72 @@ class StateMutationService:
             return char
         except Exception as e:
             self.db.rollback()
-            raise RuntimeError(f"Fallo crítico al persistir la mutación del entorno: {str(e)}")
+            raise RuntimeError(f"Fallo crítico al persistir mutación de entorno: {str(e)}")
+
+    def apply_long_rest(self, character_id: int) -> Character:
+        """
+        Ejecuta la mecánica oficial de Descanso Largo (Long Rest) del SRD:
+        Restablece por completo la vida (HP) y recupera la totalidad de los espacios de conjuro (Spell Slots).
+        """
+        char = self._get_character(character_id)
+        
+        char.hp = char.max_hp
+        
+        slots_modified = False
+        if char.spell_slots and isinstance(char.spell_slots, dict):
+            updated_slots = {}
+            for level, data in char.spell_slots.items():
+                if isinstance(data, dict) and "max" in data:
+                    updated_slots[level] = {
+                        "current": data["max"],
+                        "max": data["max"]
+                    }
+                    slots_modified = True
+                else:
+                    updated_slots[level] = data
+            char.spell_slots = updated_slots
+
+        char.evaluate_automatic_conditions()
+        
+        if slots_modified:
+            flag_modified(char, "spell_slots")
+        flag_modified(char, "conditions")
+
+        try:
+            self.db.commit()
+            self.db.refresh(char)
+            logger.info(f"🏕️ [SRD MECHANICS] {char.name} (ID: {character_id}) completó un Descanso Largo de forma exitosa.")
+            return char
+        except Exception as e:
+            self.db.rollback()
+            raise RuntimeError(f"Fallo crítico al ejecutar Descanso Largo: {str(e)}")
+        
+    def apply_spell_usage(self, character_id: int, spell_level: int) -> Character:
+        """
+        Valida y procesa el uso manual o por API de un espacio de conjuro.
+        Esta operación es atómica: si no hay slots, la mutación no ocurre.
+        """
+        char = self._get_character(character_id)
+        
+        try:
+            char.consume_spell_slot(spell_level)
+            flag_modified(char, "spell_slots")
+            
+            self.db.commit()
+            self.db.refresh(char)
+            logger.info(f"✨ [SRD SPELL] {char.name} gastó un slot de nivel {spell_level}.")
+            return char
+            
+        except ValueError as e:
+            logger.warning(f"🚫 [SRD REJECTED] Intento ilegal de uso de hechizo: {str(e)}")
+            self.db.rollback()
+            raise e
+        except Exception as e:
+            self.db.rollback()
+            raise RuntimeError(f"Error inesperado procesando hechizo: {str(e)}")
+
+    def apply_spell_mutation(self, character_id: int, spell_mutation: SpellMutationSchema) -> Character:
+        """
+        Procesa la mutación estructural mapeada directamente desde la respuesta JSON de la IA.
+        """
+        return self.apply_spell_usage(character_id, spell_mutation.level)

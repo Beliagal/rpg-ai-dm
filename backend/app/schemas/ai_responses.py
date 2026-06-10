@@ -16,6 +16,21 @@ class HpMutationSchema(BaseModel):
         description="Breve justificación mecánica u origen de la alteración dentro de la narrativa (ej. 'Ataque de trasgo', 'Trampa de flechas', 'Efecto de poción de curación')."
     )
 
+class SpellMutationSchema(BaseModel):
+    """
+    Esquema que representa el uso de un recurso mágico según el SRD.
+    """
+    level: int = Field(
+        ..., 
+        ge=1,
+        le=9,
+        description="Nivel exacto del espacio de conjuro consumido (de 1 a 9)."
+    )
+    name: str = Field(
+        ..., 
+        description="Nombre del conjuro lanzado (ej. 'Bola de Fuego', 'Curar Heridas')."
+    )
+
 class StateMutationResponseSchema(BaseModel):
     """
     Contrato estricto exigido al motor de IA Local (Ollama). 
@@ -36,4 +51,8 @@ class StateMutationResponseSchema(BaseModel):
     environment_changes: Optional[EnvironmentMutationSchema] = Field(
         None,
         description="Bloque de mutación de entorno. Se rellena si el personaje cambia de localización geográfica."
+    )
+    spell_used: Optional[SpellMutationSchema] = Field(
+        None,
+        description="Bloque de mutación mágica. Se rellena obligatoriamente cuando el personaje ejecuta un conjuro que consume un espacio de nivel 1 o superior."
     )
