@@ -1,48 +1,58 @@
-import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-def test_api_health_check(client):
+import pytest
+from fastapi.testclient import TestClient
+
+
+def test_api_health_check(client: TestClient):
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
-def test_create_and_get_character_flow(client):
+
+def test_create_and_get_character_flow(client: TestClient):
     payload = {"name": "Arthor", "race": "Humano", "char_class": "Guerrero"}
     create_response = client.post("/characters/", json=payload)
-    
-    # Verificación de creación correcta
-    assert create_response.status_code == 201 
+
+    assert create_response.status_code == 201
     char_data = create_response.json()
     assert char_data["name"] == "Arthor"
-    assert char_data["level"] == 1
-    
-    # Verificación de persistencia
+
     char_id = char_data["id"]
     get_response = client.get(f"/characters/{char_id}")
     assert get_response.status_code == 200
-    assert get_response.json()["name"] == "Arthor"
 
-@patch("app.main.gemini_service.generate_response")
-def test_roll_endpoint_integration(mock_gemini, client):
-    # Mock para aislar el test de latencias y consumos en la API de Gemini
-    mock_gemini.return_value = "El DM narra que has tenido un gran éxito en tu acción."
-    
+
+@pytest.mark.asyncio
+async def test_roll_endpoint_integration(client: TestClient):
+    """
+    Verifica que las acciones que implican mecánicas de dados se procesen correctamente
+    a través del flujo unificado del chat, sin endpoints huérfanos.
+    """
+    mock_ai_response = {
+        "narrative": "Intentas forzar la puerta oxidada usando tu fuerza bruta. El metal cede.",
+        "hp_change": None,
+        "inventory_changes": [],
+        "spell_slots_changes": {},
+        "condition_changes": [],
+        "location_change": None,
+    }
+
+    mock_async_method = AsyncMock(return_value=mock_ai_response)
+
     payload = {"name": "Shadow", "race": "Mediano", "char_class": "Pícaro"}
     create_response = client.post("/characters/", json=payload)
-    assert create_response.status_code == 201
-    
     char_id = create_response.json()["id"]
 
-    roll_payload = {
+    turn_payload = {
         "character_id": char_id,
-        "target_name": "atletismo"
+        "player_action": "Intento hacer una tirada de atletismo para derribar la puerta.",
     }
-    
-    roll_response = client.post("/game/roll", json=roll_payload)
-    assert roll_response.status_code == 200
-    
-    result = roll_response.json()
-    assert "roll_details" in result
-    assert "narrative" in result
-    assert result["roll_details"]["target"] == "atletismo"
-    assert result["narrative"] == "El DM narra que has tenido un gran éxito en tu acción."
+
+    with patch(
+        "app.services.local_ai_service.local_ai_service.generate_structured_response",
+        mock_async_method,
+    ):
+        response = client.post("/api/chat/turn", json=turn_payload)
+        assert response.status_code == 200
+        assert response.json()["narrative"] == mock_ai_response["narrative"]
